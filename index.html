@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>Team-Rechner</title>
+<style>
+  body { margin: 0; font-family: 'Segoe UI', system-ui, sans-serif; background: #f4f6f8; }
+  .tor-karte {
+    max-width: 340px; margin: 18vh auto 0; background: #fff; border: 1px solid #dde4ea;
+    border-radius: 12px; padding: 28px 26px; text-align: center;
+    box-shadow: 0 4px 16px rgba(20, 63, 94, 0.08);
+  }
+  .tor-karte h1 { font-size: 18px; margin: 0 0 6px; color: #1c2530; }
+  .tor-karte p { color: #5c6a78; font-size: 13.5px; margin: 0 0 16px; }
+  .tor-karte input {
+    width: 100%; box-sizing: border-box; padding: 10px 12px; font-size: 15px;
+    border: 1px solid #dde4ea; border-radius: 8px; margin-bottom: 10px; text-align: center;
+  }
+  .tor-karte button {
+    width: 100%; padding: 10px; font-size: 15px; font-weight: 600; color: #fff;
+    background: #1d5a86; border: 0; border-radius: 8px; cursor: pointer;
+  }
+  .tor-karte button:disabled { opacity: 0.6; cursor: wait; }
+  #fehler { color: #b3372c; font-size: 13px; min-height: 18px; margin-top: 10px; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="tor">
+  <form class="tor-karte" id="formular">
+    <h1>Interner Bereich</h1>
+    <p>Bitte das Team-Passwort eingeben.</p>
+    <input type="password" id="pw" autocomplete="current-password" autofocus>
+    <button id="knopf" type="submit">&Ouml;ffnen</button>
+    <div id="fehler"></div>
+  </form>
+</div>
+<script>
+(function () {
+  var SPEICHER = 'team-rechner-pw'
+  var nutzlastVersprechen = fetch('payload.json').then(function (r) { return r.json() })
+
+  function b64zuBytes(s) {
+    var roh = atob(s), a = new Uint8Array(roh.length)
+    for (var i = 0; i < roh.length; i++) a[i] = roh.charCodeAt(i)
+    return a
+  }
+
+  function entschluesseln(passwort, p) {
+    var enc = new TextEncoder()
+    return crypto.subtle.importKey('raw', enc.encode(passwort), 'PBKDF2', false, ['deriveKey'])
+      .then(function (basis) {
+        return crypto.subtle.deriveKey(
+          { name: 'PBKDF2', salt: b64zuBytes(p.s), iterations: p.it, hash: 'SHA-256' },
+          basis, { name: 'AES-GCM', length: 256 }, false, ['decrypt'])
+      })
+      .then(function (schluessel) {
+        return crypto.subtle.decrypt({ name: 'AES-GCM', iv: b64zuBytes(p.i) }, schluessel, b64zuBytes(p.c))
+      })
+      .then(function (klartext) { return JSON.parse(new TextDecoder().decode(klartext)) })
+  }
+
+  function starteApp(app) {
+    var stil = document.createElement('style')
+    stil.textContent = app.css
+    document.head.appendChild(stil)
+    var blob = new Blob([app.js], { type: 'text/javascript' })
+    var skript = document.createElement('script')
+    skript.type = 'module'
+    skript.src = URL.createObjectURL(blob)
+    document.body.appendChild(skript)
+    var tor = document.getElementById('tor')
+    if (tor) tor.remove()
+    document.title = 'Gehaltsrechner'
+  }
+
+  function versuch(passwort, ausSpeicher) {
+    return nutzlastVersprechen
+      .then(function (p) { return entschluesseln(passwort, p) })
+      .then(function (app) {
+        try { localStorage.setItem(SPEICHER, passwort) } catch (e) {}
+        starteApp(app)
+        return true
+      })
+      .catch(function () {
+        if (!ausSpeicher) {
+          document.getElementById('fehler').textContent = 'Falsches Passwort.'
+        } else {
+          try { localStorage.removeItem(SPEICHER) } catch (e) {}
+        }
+        return false
+      })
+  }
+
+  var gespeichert = null
+  try { gespeichert = localStorage.getItem(SPEICHER) } catch (e) {}
+  if (gespeichert) versuch(gespeichert, true)
+
+  document.getElementById('formular').addEventListener('submit', function (ev) {
+    ev.preventDefault()
+    var knopf = document.getElementById('knopf')
+    knopf.disabled = true
+    document.getElementById('fehler').textContent = ''
+    versuch(document.getElementById('pw').value, false).then(function () { knopf.disabled = false })
+  })
+})()
+</script>
+</body>
+</html>
